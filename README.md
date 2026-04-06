@@ -111,7 +111,15 @@ Open Spotify on your machine (it needs an active device), then in Claude Code:
 
 Credentials are read from environment variables. A browser window opens for OAuth — approve the connection. Done.
 
-### 7. Start a session
+### 7. Add status line (optional)
+
+Shows the current DJ mode in your Claude Code status bar (e.g. `♪ deep-focus auto`):
+
+```bash
+./setup-statusline.sh
+```
+
+### 8. Start a session
 
 ```
 > play deep focus music
