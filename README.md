@@ -41,13 +41,15 @@ Tracks are filtered by BPM (via Deezer API cross-reference), mixed 70% familiar 
 
 ### 1. Create a Spotify Developer app
 
-Go to https://developer.spotify.com/dashboard and create an app. Set the redirect URI to:
+1. Go to https://developer.spotify.com/dashboard
+2. Click **Create app**
+3. Fill in any name/description
+4. Set **Redirect URI** to `http://127.0.0.1:8901/callback` and click **Add**
+5. Save the app
+6. On the app page, copy your **Client ID** (shown on the page)
+7. Click **Show client secret** and copy your **Client Secret**
 
-```
-http://127.0.0.1:8901/callback
-```
-
-Note your **Client ID** and **Client Secret**.
+You'll need both values in step 3. The same app works on any computer — the redirect URI is localhost.
 
 ### 2. Clone and build
 
