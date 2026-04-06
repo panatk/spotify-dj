@@ -31,6 +31,33 @@ import { PlaybackMonitor } from './playback-monitor.js';
 import { notify, createDefaultNotifierConfig, NotifierConfig } from './notifier.js';
 import { lookupBPM, getCacheStats } from './bpm-lookup.js';
 import { TaskType, DJState } from './types.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+
+const STATUS_FILE = path.join(os.homedir(), '.spotify-dj', 'status.txt');
+
+function updateStatusLine(): void {
+  try {
+    if (!djState.currentTask) {
+      fs.writeFileSync(STATUS_FILE, '', { encoding: 'utf-8', mode: 0o600 });
+      return;
+    }
+    const task = djState.currentTask;
+    const arc = getArcModifier(djState);
+    const breakSoon = arc.phase === 'cooldown';
+    const onBreak = djState.breakState.isOnBreak;
+    const autopilot = autopilotState.enabled ? ' auto' : '';
+
+    let status = `${task}${autopilot}`;
+    if (onBreak) {
+      status = 'break';
+    } else if (breakSoon) {
+      status += ' (break soon)';
+    }
+    fs.writeFileSync(STATUS_FILE, status, { encoding: 'utf-8', mode: 0o600 });
+  } catch { /* non-critical */ }
+}
 
 // ── Global mutable state ─────────────────────────────────────────────
 
@@ -43,6 +70,7 @@ let notifierConfig: NotifierConfig = createDefaultNotifierConfig();
 
 function persist(): void {
   saveSession(djState);
+  updateStatusLine();
 }
 
 // ── P1: Playback monitor — skip depth tracking ─────────────────────
