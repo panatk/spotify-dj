@@ -594,11 +594,14 @@ server.tool(
 
       // P1: Session energy arc
       const arc = getArcModifier(djState);
+      const { ratio, reasoning: familiarityReasoning } = (await import('./recommendation-engine.js')).calculateFamiliarityRatio(djState);
       const arcText = [
         '',
         'Session arc:',
         `  Phase: ${arc.phase}`,
         `  Energy multiplier: ${arc.energyMultiplier.toFixed(2)}x`,
+        `  Familiarity: ${Math.round(ratio * 100)}% familiar / ${Math.round((1 - ratio) * 100)}% discovery`,
+        `  (${familiarityReasoning})`,
       ].join('\n');
 
       // P0: Break state

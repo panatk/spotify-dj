@@ -131,6 +131,86 @@ async function getFamiliarTracks(
   return result;
 }
 
+// ── Dynamic familiarity ratio ───────────────────────────────────────
+
+/**
+ * Base familiarity ratio per task type, grounded in research:
+ * - Deep focus: high familiar (minimize cognitive load)
+ * - Creative: balanced (novelty stimulates divergent thinking)
+ * - Energize: more discovery (surprise + energy go together)
+ * - Wind-down: very familiar (comfort and predictability)
+ */
+const BASE_FAMILIARITY: Record<TaskType, number> = {
+  'deep-focus': 0.75,
+  'multitasking': 0.65,
+  'creative': 0.50,
+  'routine': 0.60,
+  'energize': 0.40,
+  'wind-down': 0.85,
+};
+
+/**
+ * Calculate dynamic familiarity ratio based on:
+ * 1. Task type (base ratio)
+ * 2. Session duration (more novelty as session progresses to fight habituation)
+ * 3. Recent skip rate (high skips → more familiar, low skips → more discovery)
+ */
+export function calculateFamiliarityRatio(state: DJState): {
+  ratio: number;
+  reasoning: string;
+} {
+  const task = state.currentTask ?? 'deep-focus';
+  let ratio = BASE_FAMILIARITY[task];
+  const reasons: string[] = [`base: ${(ratio * 100).toFixed(0)}% (${task})`];
+
+  // Session duration modifier: after 20 min, start shifting toward more novelty
+  // to combat habituation (Berlyne inverted-U)
+  const cycleStart = state.workCycleStartedAt;
+  if (cycleStart) {
+    const minutesInCycle = (Date.now() - cycleStart) / 60_000;
+    if (minutesInCycle > 20) {
+      const shift = Math.min(0.15, (minutesInCycle - 20) / 100);
+      ratio -= shift;
+      reasons.push(`session: -${(shift * 100).toFixed(0)}% (${Math.round(minutesInCycle)}min in)`);
+    }
+  }
+
+  // Skip rate modifier: look at last 10 tracks
+  const recent = state.playbackHistory.slice(-10);
+  if (recent.length >= 5) {
+    const skipRate = recent.filter((t) => t.wasSkipped).length / recent.length;
+    if (skipRate > 0.4) {
+      // High skip rate → play it safer with more familiar
+      const shift = Math.min(0.15, (skipRate - 0.4) * 0.5);
+      ratio += shift;
+      reasons.push(`skips: +${(shift * 100).toFixed(0)}% (${(skipRate * 100).toFixed(0)}% skip rate)`);
+    } else if (skipRate < 0.1 && recent.length >= 8) {
+      // Very low skip rate → user is accepting everything, push boundaries
+      ratio -= 0.10;
+      reasons.push('skips: -10% (low skip rate, pushing discovery)');
+    }
+  }
+
+  // Clamp to 0.25–0.90
+  ratio = Math.max(0.25, Math.min(0.90, ratio));
+
+  return { ratio, reasoning: reasons.join(', ') };
+}
+
+/**
+ * Adaptive surprise interval: surprise tracks come more often when
+ * the user isn't skipping, less often when they are.
+ */
+export function getAdaptiveSurpriseInterval(state: DJState): number {
+  const recent = state.playbackHistory.slice(-10);
+  if (recent.length < 5) return 5; // default
+
+  const skipRate = recent.filter((t) => t.wasSkipped).length / recent.length;
+  if (skipRate > 0.3) return 8;  // skipping a lot → less surprise
+  if (skipRate < 0.1) return 4;  // barely skipping → more surprise
+  return 5;
+}
+
 // ── Main recommendation function ────────────────────────────────────
 
 export async function getRecommendations(
@@ -165,8 +245,9 @@ export async function getRecommendations(
   const recentIds = getRecentTrackIds(state);
   const penalised = getPenalisedGenres(state);
 
-  // P2: Check if it's time for a surprise track
-  if (shouldInjectSurprise(state)) {
+  // Adaptive surprise injection
+  const surpriseInterval = getAdaptiveSurpriseInterval(state);
+  if (state.tracksSinceSurprise >= surpriseInterval) {
     const surpriseGenre = pickSurpriseGenre(task);
     const surpriseParams = buildRecommendationParams(arcAdjustedParams, task, penalised);
     surpriseParams.seed_genres = [surpriseGenre];
@@ -197,8 +278,9 @@ export async function getRecommendations(
   const filteredFamiliar = filterOverplayedArtists(state, familiarPool);
   const filteredSearch = filterOverplayedArtists(state, searchTracks);
 
-  // P0: Mix 70% familiar / 30% discovered
-  const familiarCount = Math.ceil(20 * 0.7);
+  // Dynamic familiarity ratio based on task, session duration, and skip rate
+  const { ratio: familiarityRatio } = calculateFamiliarityRatio(state);
+  const familiarCount = Math.ceil(20 * familiarityRatio);
   const searchCount = 20 - familiarCount;
 
   const mixed: SpotifyTrack[] = [];
