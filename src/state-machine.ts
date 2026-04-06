@@ -23,7 +23,7 @@ const RECENT_TRACK_LIMIT = 30;
 const SKIP_PENALTY_THRESHOLD = 3;
 const ARTIST_CAP_PER_SESSION = 2; // P1: max tracks per artist before rotation
 const SURPRISE_INTERVAL = 5;      // P2: inject novelty every N tracks
-const OVEREXPOSED_THRESHOLD = 12;  // P2: deprioritize after this many plays
+const OVEREXPOSED_THRESHOLD = 3;   // deprioritize after this many plays across sessions
 
 // P0: Break/silence defaults
 const DEFAULT_BREAK_INTERVAL_MS = 25 * 60 * 1000; // 25 min
@@ -84,6 +84,7 @@ export function createInitialState(): DJState {
     tracksSinceSurprise: 0,
     workCycleStartedAt: null,
     trackExposures: {},
+    recentlyPlayedIds: [],
     circadianConfig: { wakeTimeHour: 7, wakeTimeMinute: 0 },
   };
 }
@@ -263,21 +264,30 @@ export function recordTrack(state: DJState, record: TrackRecord): DJState {
       ? Date.now() - state.sessionStartedAt
       : state.sessionDurationMs;
 
+  // Cross-session recently played — keep last 100
+  const recentlyPlayedIds = [...state.recentlyPlayedIds, record.trackId].slice(-100);
+
   return {
     ...state,
     playbackHistory,
     skippedGenres,
     artistPlayCounts,
     trackExposures,
+    recentlyPlayedIds,
     sessionDurationMs,
     currentTrackId: record.trackId,
     tracksSinceSurprise: state.tracksSinceSurprise + 1,
   };
 }
 
+/**
+ * Get track IDs to exclude — combines current session history
+ * with cross-session recently played list.
+ */
 export function getRecentTrackIds(state: DJState): Set<string> {
-  const recent = state.playbackHistory.slice(-RECENT_TRACK_LIMIT);
-  return new Set(recent.map((r) => r.trackId));
+  const sessionRecent = state.playbackHistory.slice(-RECENT_TRACK_LIMIT).map((r) => r.trackId);
+  const crossSession = state.recentlyPlayedIds;
+  return new Set([...sessionRecent, ...crossSession]);
 }
 
 export function getPenalisedGenres(state: DJState): string[] {
@@ -436,6 +446,7 @@ export function loadSession(): DJState | null {
       tracksSinceSurprise: loaded.tracksSinceSurprise ?? 0,
       workCycleStartedAt: loaded.workCycleStartedAt ?? null,
       trackExposures: loaded.trackExposures ?? {},
+      recentlyPlayedIds: loaded.recentlyPlayedIds ?? [],
       circadianConfig: loaded.circadianConfig ?? defaults.circadianConfig,
     };
   } catch {

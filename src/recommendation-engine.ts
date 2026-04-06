@@ -101,7 +101,7 @@ async function getFamiliarTracks(
     pools.push(...playlist);
   } catch { /* skip */ }
 
-  // Deduplicate
+  // Deduplicate and filter
   const seen = new Set<string>();
   const unique: SpotifyTrack[] = [];
   for (const t of pools) {
@@ -111,7 +111,24 @@ async function getFamiliarTracks(
     }
   }
 
-  return shuffle(unique);
+  // Sort by least-played first so the user hears variety
+  const exposures = state.trackExposures;
+  unique.sort((a, b) => (exposures[a.id] ?? 0) - (exposures[b.id] ?? 0));
+
+  // Shuffle within exposure tiers to avoid deterministic ordering
+  // Group tracks with same exposure count, shuffle within each group
+  const grouped = new Map<number, SpotifyTrack[]>();
+  for (const t of unique) {
+    const exp = exposures[t.id] ?? 0;
+    if (!grouped.has(exp)) grouped.set(exp, []);
+    grouped.get(exp)!.push(t);
+  }
+  const result: SpotifyTrack[] = [];
+  for (const [, tracks] of [...grouped.entries()].sort((a, b) => a[0] - b[0])) {
+    result.push(...shuffle(tracks));
+  }
+
+  return result;
 }
 
 // ── Main recommendation function ────────────────────────────────────

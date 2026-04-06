@@ -113,6 +113,8 @@ export interface DJState {
   workCycleStartedAt: number | null;
   // P2: Track exposure counts (persisted across sessions)
   trackExposures: TrackExposures;
+  // Cross-session recently played (last 100 track IDs, persisted)
+  recentlyPlayedIds: string[];
   // P2: Circadian config
   circadianConfig: CircadianConfig;
 }

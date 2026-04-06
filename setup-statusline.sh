@@ -19,7 +19,7 @@ dj_status=""
 if [ -f "$HOME/.spotify-dj/status.txt" ]; then
   dj_info=$(cat "$HOME/.spotify-dj/status.txt" 2>/dev/null)
   if [ -n "$dj_info" ]; then
-    dj_status=" \033[33m♪ $dj_info\033[0m"
+    dj_status=" | $dj_info"
   fi
 fi
 
@@ -66,7 +66,7 @@ else
   echo '  if [ -f "$HOME/.spotify-dj/status.txt" ]; then'
   echo '    dj_info=$(cat "$HOME/.spotify-dj/status.txt" 2>/dev/null)'
   echo '    if [ -n "$dj_info" ]; then'
-  echo '      dj_status=" \033[33m♪ $dj_info\033[0m"'
+  echo '      dj_status=" | $dj_info"'
   echo '    fi'
   echo '  fi'
 fi
