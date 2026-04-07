@@ -28,7 +28,7 @@ export class PlaybackMonitor {
   private onTrackChange: ((event: TrackChangeEvent) => void) | null = null;
   private pollIntervalMs: number;
 
-  constructor(client: SpotifyClient, pollIntervalMs: number = 5000) {
+  constructor(client: SpotifyClient, pollIntervalMs: number = 15000) {
     this.client = client;
     this.pollIntervalMs = pollIntervalMs;
   }
