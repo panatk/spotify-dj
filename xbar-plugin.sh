@@ -1,11 +1,10 @@
 #!/bin/bash
-# Spotify DJ — xbar menu bar plugin
-# Shows current DJ mode, why it chose it, and break countdown
+# Spotify DJ — SwiftBar menu bar plugin
 
 STATUS_FILE="$HOME/.spotify-dj/status.txt"
 
-if [ ! -f "$STATUS_FILE" ]; then
-  echo "DJ: off"
+if [ ! -f "$STATUS_FILE" ] || [ ! -s "$STATUS_FILE" ]; then
+  echo "⏸ DJ | color=gray"
   echo "---"
   echo "Spotify DJ is not running"
   echo "Start it in Claude Code: set up spotify dj"
@@ -15,28 +14,43 @@ fi
 STATUS=$(cat "$STATUS_FILE" 2>/dev/null)
 
 if [ -z "$STATUS" ]; then
-  echo "DJ: off"
+  echo "⏸ DJ | color=gray"
   echo "---"
   echo "No active session"
   exit 0
 fi
 
-# Check if on break
+# Break mode
 if echo "$STATUS" | grep -q "^BREAK"; then
-  echo "DJ: break"
+  echo "☕️ Break | color=#FF9500"
   echo "---"
-  echo "$STATUS"
+  echo "$STATUS | color=#FF9500"
+  echo "---"
+  echo "Music will resume automatically"
   exit 0
 fi
 
-# Extract task mode (first word)
-MODE=$(echo "$STATUS" | cut -d'(' -f1 | xargs)
+# Extract task mode
+MODE=$(echo "$STATUS" | cut -d'(' -f1 | sed 's/ \[auto\]//' | xargs)
 
-# Show short version in menu bar
-echo "DJ: $MODE"
+# Mode-specific emoji and color
+case "$MODE" in
+  deep-focus)   EMOJI="🧠"; COLOR="#007AFF" ;;
+  creative)     EMOJI="🎨"; COLOR="#AF52DE" ;;
+  multitasking) EMOJI="⚡️"; COLOR="#FF9500" ;;
+  routine)      EMOJI="🔄"; COLOR="#34C759" ;;
+  energize)     EMOJI="🔥"; COLOR="#FF3B30" ;;
+  wind-down)    EMOJI="🌙"; COLOR="#5856D6" ;;
+  *)            EMOJI="🎵"; COLOR="#FFFFFF" ;;
+esac
 
-# Dropdown with full details
+echo "$EMOJI $MODE | color=$COLOR"
 echo "---"
-echo "$STATUS"
+echo "$STATUS | size=12"
 echo "---"
-echo "Modes: deep-focus | creative | multitasking | routine | energize | wind-down"
+echo "🧠 deep-focus | color=#007AFF"
+echo "🎨 creative | color=#AF52DE"
+echo "⚡️ multitasking | color=#FF9500"
+echo "🔄 routine | color=#34C759"
+echo "🔥 energize | color=#FF3B30"
+echo "🌙 wind-down | color=#5856D6"
