@@ -37,8 +37,8 @@ import * as os from 'node:os';
 
 const STATUS_FILE = path.join(os.homedir(), '.spotify-dj', 'status.txt');
 
-// Track name for status line (updated by playback monitor)
-let currentTrackDisplay: string = '';
+// What triggered the current mode (shown in status line)
+let lastDecisionReason: string = '';
 
 function updateStatusLine(): void {
   try {
@@ -53,13 +53,12 @@ function updateStatusLine(): void {
         ? Math.round((Date.now() - djState.breakState.breakStartedAt) / 1000)
         : 0;
       const remaining = Math.max(0, Math.round(djState.breakState.breakDurationMs / 1000) - elapsed);
-      fs.writeFileSync(STATUS_FILE, `BREAK ${remaining}s`, { encoding: 'utf-8', mode: 0o600 });
+      fs.writeFileSync(STATUS_FILE, `BREAK ${remaining}s remaining`, { encoding: 'utf-8', mode: 0o600 });
       return;
     }
 
     const task = djState.currentTask;
     const arc = getArcModifier(djState);
-    const autopilot = autopilotState.enabled ? ' [auto]' : '';
 
     // Time until break
     let breakInfo = '';
@@ -68,19 +67,13 @@ function updateStatusLine(): void {
       const elapsed = Date.now() - cycleStart;
       const remaining = Math.max(0, djState.breakState.breakIntervalMs - elapsed);
       const mins = Math.round(remaining / 60_000);
-      if (mins <= 2) {
-        breakInfo = ' | break soon';
-      } else {
-        breakInfo = ` | break ${mins}m`;
-      }
+      breakInfo = mins <= 2 ? ' | break soon' : ` | break ${mins}m`;
     }
 
-    // Current track (truncated)
-    const track = currentTrackDisplay
-      ? ` | ${currentTrackDisplay.length > 30 ? currentTrackDisplay.slice(0, 29) + '.' : currentTrackDisplay}`
-      : '';
+    // Why we're in this mode
+    const reason = lastDecisionReason ? ` (${lastDecisionReason})` : '';
 
-    const status = `${task}${autopilot}${track}${breakInfo}`;
+    const status = `${task}${reason} | ${arc.phase}${breakInfo}`;
     fs.writeFileSync(STATUS_FILE, status, { encoding: 'utf-8', mode: 0o600 });
   } catch { /* non-critical */ }
 }
@@ -104,21 +97,11 @@ function persist(): void {
 let statusRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 function startPlaybackMonitor(): void {
-  // Refresh status line every 30s with current playback
+  // Refresh status line every 60s (break countdown, arc phase)
   if (statusRefreshTimer) clearInterval(statusRefreshTimer);
-  statusRefreshTimer = setInterval(async () => {
-    if (!spotify.isAuthenticated()) return;
-    try {
-      const playback = await spotify.getPlaybackState();
-      if (playback?.item) {
-        const artist = playback.item.artists[0]?.name ?? '';
-        currentTrackDisplay = `${playback.item.name} - ${artist}`;
-      } else {
-        currentTrackDisplay = '';
-      }
-      updateStatusLine();
-    } catch { /* non-critical */ }
-  }, 30_000);
+  statusRefreshTimer = setInterval(() => {
+    updateStatusLine();
+  }, 60_000);
 
   playbackMonitor.start((event) => {
     const depthLabel = event.wasSkipped
@@ -233,6 +216,7 @@ async function autopilotTick(): Promise<void> {
   if (!result.shouldSwitch || !result.suggestedTask) return;
 
   console.error(`[autopilot] Switching: ${djState.currentTask} → ${result.suggestedTask} (app: ${result.activeApp}, activity: ${result.activityLevel} [${result.activityCount} msgs/10min])`);
+  lastDecisionReason = result.activeApp;
 
   notify(
     notifierConfig,
@@ -404,6 +388,7 @@ server.tool(
       const ctx = detectMacOSContext();
       const suggestion = suggestTaskFromContext(ctx, djState.circadianConfig.wakeTimeHour);
       selectedTask = suggestion.suggestedTask;
+      lastDecisionReason = ctx.activeApp;
       steps.push(`Context detected: ${ctx.activeApp} → ${selectedTask} mode. ${suggestion.reasoning}`);
     }
 
@@ -434,7 +419,7 @@ server.tool(
         wasSkipped: false,
       });
       djState = { ...djState, workCycleStartedAt: djState.workCycleStartedAt ?? Date.now() };
-      currentTrackDisplay = `${first.name} - ${first.artists[0]?.name ?? ''}`;
+      // status line updated via persist()
       persist();
 
       startPlaybackMonitor();
@@ -592,7 +577,7 @@ server.tool(
         wasSkipped: false,
       });
       djState = { ...djState, workCycleStartedAt: djState.workCycleStartedAt ?? Date.now() };
-      currentTrackDisplay = `${first.name} - ${first.artists[0]?.name ?? ''}`;
+      // status line updated via persist()
       persist();
 
       // Start background monitors
