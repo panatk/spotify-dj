@@ -208,4 +208,4 @@ npm run test:watch  # watch mode
 
 ## License
 
-Private — not yet licensed for distribution.
+MIT
