@@ -37,24 +37,50 @@ import * as os from 'node:os';
 
 const STATUS_FILE = path.join(os.homedir(), '.spotify-dj', 'status.txt');
 
+// Track name for status line (updated by playback monitor)
+let currentTrackDisplay: string = '';
+
 function updateStatusLine(): void {
   try {
     if (!djState.currentTask) {
       fs.writeFileSync(STATUS_FILE, '', { encoding: 'utf-8', mode: 0o600 });
       return;
     }
+
+    const onBreak = djState.breakState.isOnBreak;
+    if (onBreak) {
+      const elapsed = djState.breakState.breakStartedAt
+        ? Math.round((Date.now() - djState.breakState.breakStartedAt) / 1000)
+        : 0;
+      const remaining = Math.max(0, Math.round(djState.breakState.breakDurationMs / 1000) - elapsed);
+      fs.writeFileSync(STATUS_FILE, `BREAK ${remaining}s`, { encoding: 'utf-8', mode: 0o600 });
+      return;
+    }
+
     const task = djState.currentTask;
     const arc = getArcModifier(djState);
-    const breakSoon = arc.phase === 'cooldown';
-    const onBreak = djState.breakState.isOnBreak;
-    const autopilot = autopilotState.enabled ? ' auto' : '';
+    const autopilot = autopilotState.enabled ? ' [auto]' : '';
 
-    let status = `${task}${autopilot}`;
-    if (onBreak) {
-      status = 'break';
-    } else if (breakSoon) {
-      status += ' (break soon)';
+    // Time until break
+    let breakInfo = '';
+    const cycleStart = djState.workCycleStartedAt;
+    if (cycleStart) {
+      const elapsed = Date.now() - cycleStart;
+      const remaining = Math.max(0, djState.breakState.breakIntervalMs - elapsed);
+      const mins = Math.round(remaining / 60_000);
+      if (mins <= 2) {
+        breakInfo = ' | break soon';
+      } else {
+        breakInfo = ` | break ${mins}m`;
+      }
     }
+
+    // Current track (truncated)
+    const track = currentTrackDisplay
+      ? ` | ${currentTrackDisplay.length > 30 ? currentTrackDisplay.slice(0, 29) + '.' : currentTrackDisplay}`
+      : '';
+
+    const status = `${task}${autopilot}${track}${breakInfo}`;
     fs.writeFileSync(STATUS_FILE, status, { encoding: 'utf-8', mode: 0o600 });
   } catch { /* non-critical */ }
 }
@@ -75,7 +101,25 @@ function persist(): void {
 
 // ── P1: Playback monitor — skip depth tracking ─────────────────────
 
+let statusRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
 function startPlaybackMonitor(): void {
+  // Refresh status line every 30s with current playback
+  if (statusRefreshTimer) clearInterval(statusRefreshTimer);
+  statusRefreshTimer = setInterval(async () => {
+    if (!spotify.isAuthenticated()) return;
+    try {
+      const playback = await spotify.getPlaybackState();
+      if (playback?.item) {
+        const artist = playback.item.artists[0]?.name ?? '';
+        currentTrackDisplay = `${playback.item.name} - ${artist}`;
+      } else {
+        currentTrackDisplay = '';
+      }
+      updateStatusLine();
+    } catch { /* non-critical */ }
+  }, 30_000);
+
   playbackMonitor.start((event) => {
     const depthLabel = event.wasSkipped
       ? `skipped at ${Math.round(event.skipDepth * 100)}%`
@@ -390,6 +434,7 @@ server.tool(
         wasSkipped: false,
       });
       djState = { ...djState, workCycleStartedAt: djState.workCycleStartedAt ?? Date.now() };
+      currentTrackDisplay = `${first.name} - ${first.artists[0]?.name ?? ''}`;
       persist();
 
       startPlaybackMonitor();
@@ -547,6 +592,7 @@ server.tool(
         wasSkipped: false,
       });
       djState = { ...djState, workCycleStartedAt: djState.workCycleStartedAt ?? Date.now() };
+      currentTrackDisplay = `${first.name} - ${first.artists[0]?.name ?? ''}`;
       persist();
 
       // Start background monitors
