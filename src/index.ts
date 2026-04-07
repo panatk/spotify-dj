@@ -39,6 +39,7 @@ const STATUS_FILE = path.join(os.homedir(), '.spotify-dj', 'status.txt');
 
 // What triggered the current mode (shown in status line)
 let lastDecisionReason: string = '';
+let currentTrackForStatus: string = '';
 
 function updateStatusLine(): void {
   try {
@@ -73,7 +74,8 @@ function updateStatusLine(): void {
     // Why we're in this mode
     const reason = lastDecisionReason ? ` (${lastDecisionReason})` : '';
 
-    const status = `${task}${reason} | ${arc.phase}${breakInfo}`;
+    const track = currentTrackForStatus ? `\n${currentTrackForStatus}` : '';
+    const status = `${task}${reason} | ${arc.phase}${breakInfo}${track}`;
     fs.writeFileSync(STATUS_FILE, status, { encoding: 'utf-8', mode: 0o600 });
   } catch { /* non-critical */ }
 }
@@ -97,11 +99,18 @@ function persist(): void {
 let statusRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 function startPlaybackMonitor(): void {
-  // Refresh status line every 60s (break countdown, arc phase)
+  // Refresh status line every 30s (break countdown, arc phase, current track)
   if (statusRefreshTimer) clearInterval(statusRefreshTimer);
-  statusRefreshTimer = setInterval(() => {
+  statusRefreshTimer = setInterval(async () => {
+    try {
+      const playback = await spotify.getPlaybackState();
+      if (playback?.item) {
+        const artist = playback.item.artists[0]?.name ?? '';
+        currentTrackForStatus = `${playback.item.name} - ${artist}`;
+      }
+    } catch { /* non-critical */ }
     updateStatusLine();
-  }, 60_000);
+  }, 30_000);
 
   playbackMonitor.start((event) => {
     const depthLabel = event.wasSkipped
@@ -419,7 +428,7 @@ server.tool(
         wasSkipped: false,
       });
       djState = { ...djState, workCycleStartedAt: djState.workCycleStartedAt ?? Date.now() };
-      // status line updated via persist()
+      currentTrackForStatus = `${first.name} - ${first.artists[0]?.name ?? ''}`;
       persist();
 
       startPlaybackMonitor();
@@ -577,7 +586,7 @@ server.tool(
         wasSkipped: false,
       });
       djState = { ...djState, workCycleStartedAt: djState.workCycleStartedAt ?? Date.now() };
-      // status line updated via persist()
+      currentTrackForStatus = `${first.name} - ${first.artists[0]?.name ?? ''}`;
       persist();
 
       // Start background monitors

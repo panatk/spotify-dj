@@ -11,9 +11,11 @@ if [ ! -f "$STATUS_FILE" ] || [ ! -s "$STATUS_FILE" ]; then
   exit 0
 fi
 
-STATUS=$(cat "$STATUS_FILE" 2>/dev/null)
+# Read status file — line 1 is mode info, line 2 (if present) is current track
+LINE1=$(sed -n '1p' "$STATUS_FILE")
+TRACK=$(sed -n '2p' "$STATUS_FILE")
 
-if [ -z "$STATUS" ]; then
+if [ -z "$LINE1" ]; then
   echo "⏸ DJ | color=gray"
   echo "---"
   echo "No active session"
@@ -21,17 +23,17 @@ if [ -z "$STATUS" ]; then
 fi
 
 # Break mode
-if echo "$STATUS" | grep -q "^BREAK"; then
+if echo "$LINE1" | grep -q "^BREAK"; then
   echo "☕️ Break | color=#FF9500"
   echo "---"
-  echo "$STATUS | color=#FF9500"
+  echo "$LINE1 | color=#FF9500"
   echo "---"
   echo "Music will resume automatically"
   exit 0
 fi
 
 # Extract task mode
-MODE=$(echo "$STATUS" | cut -d'(' -f1 | sed 's/ \[auto\]//' | xargs)
+MODE=$(echo "$LINE1" | cut -d'(' -f1 | sed 's/ \[auto\]//' | xargs)
 
 # Mode-specific emoji and color
 case "$MODE" in
@@ -46,7 +48,11 @@ esac
 
 echo "$EMOJI $MODE | color=$COLOR"
 echo "---"
-echo "$STATUS | size=12"
+if [ -n "$TRACK" ]; then
+  echo "🎵 $TRACK | size=13"
+  echo "---"
+fi
+echo "$LINE1 | size=12 color=gray"
 echo "---"
 echo "🧠 deep-focus | color=#007AFF"
 echo "🎨 creative | color=#AF52DE"
