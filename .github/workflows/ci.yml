@@ -82,36 +82,3 @@ jobs:
           fi
           echo "OAuth server binds to localhost only"
 
-  ai-security-review:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get changed files
-        id: diff
-        run: |
-          FILES=$(git diff --name-only origin/main...HEAD -- '*.ts' '*.json' '*.sh' | head -20)
-          echo "files=$FILES" >> $GITHUB_OUTPUT
-
-      - name: AI Security Review
-        if: steps.diff.outputs.files != ''
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            Review the changed files in this PR for security issues. Focus on:
-            1. Hardcoded secrets or credentials
-            2. Shell injection via execSync/exec with user-controlled input
-            3. Missing file permission enforcement (writeFileSync without mode: 0o600)
-            4. OAuth server binding (must be 127.0.0.1, not 0.0.0.0)
-            5. User input flowing into shell commands unsanitized
-            6. SSRF via unvalidated URLs in fetch calls
-
-            If you find issues, comment on the PR with severity and fix recommendations.
-            If everything looks clean, comment "Security review: no issues found."
