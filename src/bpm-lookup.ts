@@ -33,7 +33,7 @@ function loadCache(): void {
 function saveCache(): void {
   try {
     const dir = path.dirname(CACHE_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.writeFileSync(CACHE_FILE, JSON.stringify(bpmCache), { encoding: 'utf-8', mode: 0o600 });
   } catch { /* non-critical */ }
 }

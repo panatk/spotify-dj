@@ -1,0 +1,117 @@
+name: CI + Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for secret scanning
+
+      - name: Scan for secrets in git history
+        run: |
+          # Check for common secret patterns across all commits
+          FOUND=0
+          for pattern in \
+            'AKIA[0-9A-Z]{16}' \
+            'gh[pousr]_[A-Za-z0-9_]{36,}' \
+            '-----BEGIN.*PRIVATE KEY-----' \
+            'sk-[A-Za-z0-9]{48}' \
+            'xox[baprs]-[A-Za-z0-9-]{10,}'; do
+            if git log -p --all -S "$pattern" -- ':(exclude)*.yml' ':(exclude)*.test.ts' 2>/dev/null | grep -qE "$pattern"; then
+              echo "FAIL: Pattern '$pattern' found in git history"
+              FOUND=1
+            fi
+          done
+          if [ $FOUND -eq 1 ]; then
+            echo "::error::Secrets detected in git history"
+            exit 1
+          fi
+          echo "No secrets found in git history"
+
+      - name: Check file permission enforcement in code
+        run: |
+          # Every writeFileSync must have mode: 0o600
+          VIOLATIONS=$(grep -rn 'writeFileSync' src/*.ts \
+            | grep -v 'test' \
+            | grep -v '0o600' \
+            | grep -v '//' || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::writeFileSync calls without mode: 0o600:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "All writeFileSync calls have mode: 0o600"
+
+      - name: Check no shell injection vectors
+        run: |
+          # execSync/exec with template literals containing user data
+          VIOLATIONS=$(grep -Pn 'exec(Sync)?\s*\(`[^`]*\$\{(track|artist|title|name|message)' src/*.ts || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::Shell injection risk:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "No shell injection vectors found"
+
+      - name: Verify OAuth binds to localhost
+        run: |
+          if ! grep -q "server.listen(REDIRECT_PORT, '127.0.0.1')" src/spotify-client.ts; then
+            echo "::error::OAuth server must bind to 127.0.0.1"
+            exit 1
+          fi
+          echo "OAuth server binds to localhost only"
+
+  ai-security-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: diff
+        run: |
+          FILES=$(git diff --name-only origin/main...HEAD -- '*.ts' '*.json' '*.sh' | head -20)
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+
+      - name: AI Security Review
+        if: steps.diff.outputs.files != ''
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review the changed files in this PR for security issues. Focus on:
+            1. Hardcoded secrets or credentials
+            2. Shell injection via execSync/exec with user-controlled input
+            3. Missing file permission enforcement (writeFileSync without mode: 0o600)
+            4. OAuth server binding (must be 127.0.0.1, not 0.0.0.0)
+            5. User input flowing into shell commands unsanitized
+            6. SSRF via unvalidated URLs in fetch calls
+
+            If you find issues, comment on the PR with severity and fix recommendations.
+            If everything looks clean, comment "Security review: no issues found."
