@@ -111,9 +111,20 @@ Open Spotify on your machine (it needs an active device), then in Claude Code:
 
 Credentials are read from environment variables. A browser window opens for OAuth — approve the connection. Done.
 
-### 7. Add status line (optional)
+### 7. Add menu bar widget (recommended)
 
-Shows the current DJ mode in your Claude Code status bar (e.g. `♪ deep-focus auto`):
+Shows the current DJ mode in your macOS menu bar — visible from any app:
+
+```bash
+brew install --cask xbar
+./setup-menubar.sh
+```
+
+Opens xbar and shows `DJ: deep-focus` in your menu bar. Click it for details (why it chose that mode, break countdown). Updates every 30 seconds.
+
+### 7b. Add Claude Code status line (optional)
+
+If you also want it in the Claude Code status bar:
 
 ```bash
 ./setup-statusline.sh
