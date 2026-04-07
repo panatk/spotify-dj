@@ -273,6 +273,169 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
+// ── Tool 0: spotify_setup (guided onboarding) ──────────────────────
+
+server.tool(
+  'spotify_setup',
+  'Guided first-run setup. Handles authentication, wake time, and starts your first session. If already authenticated, skips straight to playing.',
+  {
+    client_id: z.string().optional().describe('Spotify app client ID (or set SPOTIFY_CLIENT_ID env var)'),
+    client_secret: z.string().optional().describe('Spotify app client secret (or set SPOTIFY_CLIENT_SECRET env var)'),
+    wake_hour: z.number().min(0).max(23).optional().describe('Your typical wake time hour (0-23, e.g. 7 for 7am)'),
+    task: z
+      .enum(['deep-focus', 'multitasking', 'creative', 'routine', 'energize', 'wind-down'])
+      .optional()
+      .describe('Task type to start with (default: auto-detected from your current context)'),
+    enable_autopilot: z.boolean().optional().describe('Enable autopilot immediately (default: true)'),
+  },
+  async ({ client_id, client_secret, wake_hour, task, enable_autopilot }) => {
+    const steps: string[] = [];
+
+    // ── Step 1: Authentication ──────────────────────────────────
+    if (spotify.isAuthenticated()) {
+      steps.push('Already authenticated with Spotify.');
+    } else {
+      const resolvedId = process.env.SPOTIFY_CLIENT_ID ?? client_id;
+      const resolvedSecret = process.env.SPOTIFY_CLIENT_SECRET ?? client_secret;
+
+      if (!resolvedId || !resolvedSecret) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: [
+              'Welcome to Spotify DJ.',
+              '',
+              'First, you need a Spotify Developer app. This takes 2 minutes',
+              'and means your music data stays between you and Spotify — no middleman.',
+              '',
+              '1. Go to https://developer.spotify.com/dashboard',
+              '2. Click "Create app" — any name/description works',
+              '3. Set Redirect URI to: http://127.0.0.1:8901/callback',
+              '4. Save, then copy your Client ID and Client Secret',
+              '',
+              'Then run this again with your credentials:',
+              '  client_id: "your_id"',
+              '  client_secret: "your_secret"',
+              '',
+              'Or set them as environment variables (recommended):',
+              '  export SPOTIFY_CLIENT_ID="your_id"',
+              '  export SPOTIFY_CLIENT_SECRET="your_secret"',
+              '',
+              'Why a developer app? Your tokens stay on your machine.',
+              'We never see your credentials. You own your data.',
+            ].join('\n'),
+          }],
+        };
+      }
+
+      try {
+        await spotify.authorize(resolvedId, resolvedSecret);
+        steps.push('Spotify connected. Your tokens are stored locally at ~/.spotify-dj/');
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Authentication failed: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+          isError: true,
+        };
+      }
+    }
+
+    // ── Step 2: Wake time ───────────────────────────────────────
+    if (wake_hour !== undefined) {
+      djState = {
+        ...djState,
+        circadianConfig: { wakeTimeHour: wake_hour, wakeTimeMinute: 0 },
+      };
+      persist();
+      steps.push(`Wake time set to ${wake_hour}:00. Music energy follows your circadian rhythm.`);
+    } else if (djState.circadianConfig.wakeTimeHour === 7) {
+      steps.push('Wake time: 7:00 AM (default). Use spotify_set_wake_time to adjust.');
+    }
+
+    // ── Step 3: Detect context and start playing ────────────────
+    let selectedTask = task;
+    if (!selectedTask) {
+      const ctx = detectMacOSContext();
+      const suggestion = suggestTaskFromContext(ctx, djState.circadianConfig.wakeTimeHour);
+      selectedTask = suggestion.suggestedTask;
+      steps.push(`Context detected: ${ctx.activeApp} → ${selectedTask} mode. ${suggestion.reasoning}`);
+    }
+
+    try {
+      if (reset_adjustments_needed()) {
+        djState = resetDeltas(djState);
+      }
+      djState = transitionToTask(djState, selectedTask);
+      persist();
+
+      const result = await getRecommendations(spotify, djState);
+      if (result.tracks.length === 0) {
+        steps.push('No tracks found — open Spotify and play something first, then try again.');
+        return { content: [{ type: 'text' as const, text: steps.join('\n\n') }] };
+      }
+
+      const uris = result.tracks.map((t) => t.uri);
+      await spotify.play(uris);
+
+      const first = result.tracks[0];
+      djState = recordTrack(djState, {
+        trackId: first.id,
+        trackName: first.name,
+        artist: first.artists.map((a) => a.name).join(', '),
+        artistIds: first.artists.map((a) => a.id),
+        playedAt: Date.now(),
+        taskType: selectedTask,
+        wasSkipped: false,
+      });
+      djState = { ...djState, workCycleStartedAt: djState.workCycleStartedAt ?? Date.now() };
+      persist();
+
+      startPlaybackMonitor();
+      startBreakMonitor();
+
+      const trackList = result.tracks
+        .slice(0, 5)
+        .map((t, i) => `  ${i + 1}. ${t.name} — ${t.artists.map((a) => a.name).join(', ')}`)
+        .join('\n');
+
+      steps.push(`Now playing (${selectedTask}):\n${trackList}`);
+    } catch (error) {
+      steps.push(`Error starting playback: ${error instanceof Error ? error.message : String(error)}`);
+      return { content: [{ type: 'text' as const, text: steps.join('\n\n') }] };
+    }
+
+    // ── Step 4: Autopilot ───────────────────────────────────────
+    if (enable_autopilot !== false) {
+      startAutopilot();
+      steps.push(
+        'Autopilot is ON. The DJ is watching your screen and will transition ' +
+        'the music as you switch between apps. A silence break happens every ' +
+        '25 minutes to keep your focus sharp (ultradian rhythm).',
+      );
+    }
+
+    // ── Step 5: Science summary ─────────────────────────────────
+    const profile = TASK_PROFILES[selectedTask];
+    steps.push([
+      `The science: ${selectedTask} mode uses ${profile.minBPM}-${profile.maxBPM} BPM, ` +
+      `${profile.energy < 0.4 ? 'low' : profile.energy < 0.7 ? 'moderate' : 'high'} energy, ` +
+      `${profile.instrumentalness > 0.7 ? 'mostly instrumental' : 'with vocals'}. ` +
+      `${profile.mode === 0 ? 'Minor key reduces emotional salience.' : 'Major key supports positive mood.'}`,
+      '',
+      'Just work. The DJ handles the rest.',
+    ].join('\n'));
+
+    return { content: [{ type: 'text' as const, text: steps.join('\n\n') }] };
+  },
+);
+
+function reset_adjustments_needed(): boolean {
+  const d = djState.parameterDeltas;
+  return d.bpmOffset !== 0 || d.energyOffset !== 0 || d.valenceOffset !== 0 || d.instrumentalnessOffset !== 0;
+}
+
 // ── Tool 1: spotify_auth ─────────────────────────────────────────────
 
 server.tool(

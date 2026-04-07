@@ -119,13 +119,17 @@ Shows the current DJ mode in your Claude Code status bar (e.g. `♪ deep-focus a
 ./setup-statusline.sh
 ```
 
-### 8. Start a session
+### 8. Start
+
+Open Spotify on your Mac, then in Claude Code just say:
 
 ```
-> play deep focus music
-> turn on autopilot
-> set my wake time to 8am
+> set up spotify dj
 ```
+
+That's it. The DJ detects your context, sets up authentication, starts playing, and turns on autopilot. On subsequent sessions, it skips straight to playing — no setup needed.
+
+**Why a Developer app?** Your tokens stay on your machine. We never see your credentials. You own your data.
 
 ## Tools
 
