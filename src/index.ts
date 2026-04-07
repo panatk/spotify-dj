@@ -405,6 +405,7 @@ server.tool(
       if (reset_adjustments_needed()) {
         djState = resetDeltas(djState);
       }
+      djState = endBreak(djState);
       djState = transitionToTask(djState, selectedTask);
       persist();
 
@@ -553,7 +554,8 @@ server.tool(
         djState = resetDeltas(djState);
       }
 
-      // Transition to the new task (smooth ramp if switching)
+      // Reset break state and transition to the new task
+      djState = endBreak(djState);
       djState = transitionToTask(djState, task);
       persist();
 
